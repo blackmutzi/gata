@@ -7,19 +7,30 @@ import (
 	"os/signal"
 	"syscall"
 	"strings"
-	"time"
+	"encoding/json"
+	"io/ioutil"
 )
 
-func main() {
-	DiscordBot( "my_token" )
+type DiscordConfig struct {
+	BotName string `json:"name"`
+	Token string `json:"token"`
+	RolePermission string `json:"role"`
 }
 
-/*
+type BotVoiceState struct {
+	VoiceConnection * discordgo.VoiceConnection
+}
 
- */
-func DiscordBot( token string ) ( err error ){
+var AlexaDiscordConfig DiscordConfig
+var AlexaVoiceState BotVoiceState
+
+func DiscordBot( configFile string ) ( err error ){
+	// read config file
+	bytes , _ := ioutil.ReadFile( configFile )
+	json.Unmarshal( bytes , &AlexaDiscordConfig )
+
 	// Create a new Discord session using the provided bot token.
-	session, err := discordgo.New("Bot " + token)
+	session, err := discordgo.New("Bot " + AlexaDiscordConfig.Token )
 	if err != nil {
 		return err
 	}
@@ -53,35 +64,47 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	// Find the channel that the message came from.
+	c, err := s.State.Channel(m.ChannelID)
+	if err != nil {
+		// Could not find channel.
+		return
+	}
+
+	// Find the guild for that channel.
+	g, err := s.State.Guild(c.GuildID)
+	if err != nil {
+		// Could not find guild.
+		return
+	}
+
+	// Join to Voice Channel
 	if strings.HasPrefix( m.Content , "!join"){
-		// Find the channel that the message came from.
-		c, err := s.State.Channel(m.ChannelID)
-		if err != nil {
-			// Could not find channel.
-			return
-		}
-
-		// Find the guild for that channel.
-		g, err := s.State.Guild(c.GuildID)
-		if err != nil {
-			// Could not find guild.
-			return
-		}
-
-		// Look for the message sender in that guild's current voice states.
 		for _, vs := range g.VoiceStates {
 			if vs.UserID == m.Author.ID {
-
 				member , _ := s.GuildMember( g.ID , vs.UserID )
-				if hasMemberRole( s , g , member , "Master of Disaster") {
-					s.ChannelMessageSend( m.ChannelID, "Hallo " + member.User.Username )
-					voiceConnection , _ := JoinVoiceChannel( s , g.ID , vs.ChannelID )
-					time.Sleep(2000 * time.Millisecond)
-					voiceConnection.Disconnect()
+				if hasMemberRole( s , g , member , AlexaDiscordConfig.RolePermission ) {
+					AlexaVoiceState.VoiceConnection , _ = JoinVoiceChannel( s , g.ID , vs.ChannelID )
+				}
+			}
+		}
+		return
+	}
+
+	// Leave the Voice Channel
+	if strings.HasPrefix( m.Content , "!leave"){
+		for _, vs := range g.VoiceStates {
+			if vs.UserID == m.Author.ID {
+				member , _ := s.GuildMember( g.ID , vs.UserID )
+				if hasMemberRole( s , g , member , AlexaDiscordConfig.RolePermission ) {
+					if AlexaVoiceState.VoiceConnection != nil {
+						AlexaVoiceState.VoiceConnection.Disconnect()
+					}
 				}
 
 			}
 		}
+		return
 	}
 
 
@@ -99,7 +122,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 // Permission Tests, abfrage ob ein Member die jeweilige Rolle besitzt!
 func hasMemberRole( session *discordgo.Session , guild * discordgo.Guild, member *discordgo.Member , permissionRole string ) bool {
 	guildRoles , _ := session.GuildRoles( guild.ID )
-
 	for _ , memberRoleID := range member.Roles {
 		for _ , guildrole := range guildRoles {
 			if guildrole.ID ==  memberRoleID && guildrole.Name == permissionRole {
@@ -111,12 +133,14 @@ func hasMemberRole( session *discordgo.Session , guild * discordgo.Guild, member
 	return false
 }
 
-
+// Join the provided voice channel
 func JoinVoiceChannel( s *discordgo.Session, guildID, channelID string ) (voice * discordgo.VoiceConnection , err error ){
-	// Join the provided voice channel.
 	return s.ChannelVoiceJoin(guildID, channelID, false, true)
 }
 
+func main() {
+	DiscordBot("discord-bot-config.json")
+}
 
 
 
