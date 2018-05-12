@@ -1,2 +1,2 @@
-# gata
-go alexa twitch assistant
+# gate
+go alexa twitch energy / assistant 
