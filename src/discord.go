@@ -9,6 +9,7 @@ import (
 	"strings"
 	"encoding/json"
 	"io/ioutil"
+	"time"
 )
 
 type DiscordConfig struct {
@@ -19,6 +20,7 @@ type DiscordConfig struct {
 
 type BotVoiceState struct {
 	VoiceConnection * discordgo.VoiceConnection
+	Status bool
 }
 
 var AlexaDiscordConfig DiscordConfig
@@ -53,7 +55,6 @@ func DiscordBot( configFile string ) ( err error ){
 	return err
 }
 
-
 // This function will be called (due to AddHandler above) every time a new
 // message is created on any channel that the autenticated bot has access to.
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -85,6 +86,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				member , _ := s.GuildMember( g.ID , vs.UserID )
 				if hasMemberRole( s , g , member , AlexaDiscordConfig.RolePermission ) {
 					AlexaVoiceState.VoiceConnection , _ = JoinVoiceChannel( s , g.ID , vs.ChannelID )
+					AlexaVoiceState.Status = true
+					go captureVoice()
 				}
 			}
 		}
@@ -98,6 +101,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				member , _ := s.GuildMember( g.ID , vs.UserID )
 				if hasMemberRole( s , g , member , AlexaDiscordConfig.RolePermission ) {
 					if AlexaVoiceState.VoiceConnection != nil {
+						AlexaVoiceState.Status = false
 						AlexaVoiceState.VoiceConnection.Disconnect()
 					}
 				}
@@ -116,6 +120,24 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	// If the message is "pong" reply with "Ping!"
 	if m.Content == "pong" {
 		s.ChannelMessageSend(m.ChannelID, "Ping!")
+	}
+}
+
+// Capture and Send Voice Example ( funktioniert noch nicht ... )
+func captureVoice( ){
+	for AlexaVoiceState.Status {
+		for packet := range AlexaVoiceState.VoiceConnection.OpusRecv {
+
+			time.Sleep(250 * time.Millisecond)
+			// Start speaking.
+			AlexaVoiceState.VoiceConnection.Speaking(true)
+
+			AlexaVoiceState.VoiceConnection.OpusSend <- packet.Opus
+
+			// Stop speaking
+			AlexaVoiceState.VoiceConnection.Speaking(false)
+			time.Sleep(250 * time.Millisecond)
+		}
 	}
 }
 
@@ -141,6 +163,4 @@ func JoinVoiceChannel( s *discordgo.Session, guildID, channelID string ) (voice 
 func main() {
 	DiscordBot("discord-bot-config.json")
 }
-
-
 
